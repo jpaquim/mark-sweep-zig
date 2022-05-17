@@ -1,15 +1,19 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Object = union(enum) {
-    int: i32,
-    pair: Pair,
-};
-const ObjectType = std.meta.Tag(Object);
+const Object = struct {
+    pub const Data = union(enum) {
+        int: i32,
+        pair: Pair,
+    };
+    const Pair = struct {
+        head: ?*Object = null,
+        tail: ?*Object = null,
+    };
+    pub const Type = std.meta.Tag(Data);
 
-const Pair = struct {
-    head: ?*Object = null,
-    tail: ?*Object = null,
+    data: Data,
+    marked: bool,
 };
 
 const stack_max = 256;
@@ -37,28 +41,50 @@ pub fn pop(vm: *VM) *Object {
     return vm.stack[@intCast(usize, vm.stack_size)];
 }
 
-pub fn newObject(allocator: Allocator, vm: *VM, object_type: ObjectType) !*Object {
+pub fn newObject(allocator: Allocator, vm: *VM, object_type: Object.Type) !*Object {
     _ = vm;
     var ptr = try allocator.create(Object);
-    ptr.* = switch (object_type) {
-        .int => Object{ .int = 0 },
-        .pair => Object{ .pair = .{} },
+    ptr.* = .{
+        .data = switch (object_type) {
+            .int => .{ .int = 0 },
+            .pair => .{ .pair = .{} },
+        },
+        .marked = false,
     };
     return ptr;
 }
 
 pub fn pushInt(allocator: Allocator, vm: *VM, intValue: i32) !void {
     const object = try newObject(allocator, vm, .int);
-    object.int = intValue;
+    object.data.int = intValue;
     push(vm, object);
 }
 
 pub fn pushPair(allocator: Allocator, vm: *VM) !*Object {
     const object = try newObject(allocator, vm, .pair);
-    object.pair.tail = pop(vm);
-    object.pair.head = pop(vm);
+    object.data.pair.tail = pop(vm);
+    object.data.pair.head = pop(vm);
     push(vm, object);
     return object;
+}
+
+pub fn markAll(vm: *VM) void {
+    for (vm.stack) |ptr| {
+        mark(ptr);
+    }
+}
+
+pub fn mark(object: *Object) void {
+    // If already marked, we're done. Check this first
+    // to avoid recursing on cycles in the object graph.
+    if (object.marked) return;
+
+    object.marked = true;
+
+    if (object.data == .pair) {
+        mark(object.data.head);
+        mark(object.data.tail);
+    }
 }
 
 pub fn main() anyerror!void {
@@ -84,8 +110,8 @@ pub fn main() anyerror!void {
     try pushInt(allocator, vm, 4);
     const c = try pushPair(allocator, vm);
     defer {
-        allocator.destroy(c.pair.head.?);
-        allocator.destroy(c.pair.tail.?);
+        allocator.destroy(c.data.pair.head.?);
+        allocator.destroy(c.data.pair.tail.?);
         allocator.destroy(c);
     }
     std.debug.print("c: {}\n", .{c});
