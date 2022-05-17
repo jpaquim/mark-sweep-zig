@@ -97,15 +97,14 @@ pub fn mark(object: *Object) void {
 }
 
 pub fn sweep(allocator: Allocator, vm: *VM) void {
-    var object = &vm.first_object;
-    while (object.* != null) {
-        if (!object.*.?.marked) {
-            const unreached = object.*.?;
-            object.* = unreached.next;
-            allocator.destroy(unreached);
+    var object_ptr = &vm.first_object;
+    while (object_ptr.*) |object| {
+        if (!object.marked) {
+            object_ptr.* = object.next;
+            allocator.destroy(object);
         } else {
-            object.*.?.marked = false;
-            object = &object.*.?.next;
+            object.marked = false;
+            object_ptr = &object.next;
         }
     }
 }
@@ -133,14 +132,13 @@ pub fn main() anyerror!void {
 
     try pushInt(allocator, vm, 3);
     try pushInt(allocator, vm, 4);
-    const c = try pushPair(allocator, vm);
+    _ = try pushPair(allocator, vm);
 
-    const d = pop(vm);
+    const c = pop(vm);
 
-    _ = a;
-    _ = b;
-    _ = c;
-    _ = d;
+    std.debug.print("{}\n", .{a});
+    std.debug.print("{}\n", .{b});
+    std.debug.print("{}\n", .{c});
 }
 
 test "basic test" {
