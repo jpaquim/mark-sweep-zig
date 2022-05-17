@@ -18,18 +18,23 @@ const Object = struct {
 };
 
 const stack_max = 256;
+const init_obj_num_max = 8;
 
 const VM = struct {
     stack: [stack_max]*Object,
     stack_size: i32,
     first_object: ?*Object,
+    num_objects: i32,
+    max_objects: i32,
 };
 
 pub fn newVM(allocator: Allocator) !*VM {
-    var ptr = try allocator.create(VM);
-    ptr.stack_size = 0;
-    ptr.first_object = null;
-    return ptr;
+    var vm = try allocator.create(VM);
+    vm.stack_size = 0;
+    vm.first_object = null;
+    vm.num_objects = 0;
+    vm.max_objects = init_obj_num_max;
+    return vm;
 }
 
 pub fn push(vm: *VM, value: *Object) void {
@@ -45,6 +50,8 @@ pub fn pop(vm: *VM) *Object {
 }
 
 pub fn newObject(allocator: Allocator, vm: *VM, object_type: Object.Type) !*Object {
+    if (vm.num_objects == vm.max_objects) gc(allocator, vm);
+
     var object = try allocator.create(Object);
     object.* = .{
         .data = switch (object_type) {
@@ -55,6 +62,7 @@ pub fn newObject(allocator: Allocator, vm: *VM, object_type: Object.Type) !*Obje
         .next = vm.first_object,
     };
     vm.first_object = object;
+    vm.num_objects += 1;
     return object;
 }
 
@@ -102,6 +110,7 @@ pub fn sweep(allocator: Allocator, vm: *VM) void {
         if (!object.marked) {
             object_ptr.* = object.next;
             allocator.destroy(object);
+            vm.num_objects -= 1;
         } else {
             object.marked = false;
             object_ptr = &object.next;
@@ -110,9 +119,14 @@ pub fn sweep(allocator: Allocator, vm: *VM) void {
 }
 
 pub fn gc(allocator: Allocator, vm: *VM) void {
-    _ = allocator;
+    const num_objects = vm.num_objects;
+
     markAll(vm);
     sweep(allocator, vm);
+
+    vm.max_objects = vm.num_objects * 2;
+
+    std.debug.print("Collected {} objects, {} remaining\n", .{ num_objects - vm.num_objects, vm.num_objects });
 }
 
 pub fn main() anyerror!void {
@@ -129,16 +143,26 @@ pub fn main() anyerror!void {
     try pushInt(allocator, vm, 2);
     const a = pop(vm);
     const b = pop(vm);
+    std.debug.print("{}\n", .{a});
+    std.debug.print("{}\n", .{b});
 
     try pushInt(allocator, vm, 3);
     try pushInt(allocator, vm, 4);
     _ = try pushPair(allocator, vm);
-
     const c = pop(vm);
-
-    std.debug.print("{}\n", .{a});
-    std.debug.print("{}\n", .{b});
     std.debug.print("{}\n", .{c});
+
+    try pushInt(allocator, vm, 5);
+    try pushInt(allocator, vm, 6);
+    _ = try pushPair(allocator, vm);
+    const d = pop(vm);
+    std.debug.print("{}\n", .{d});
+
+    try pushInt(allocator, vm, 7);
+    try pushInt(allocator, vm, 8);
+    _ = try pushPair(allocator, vm);
+    const e = pop(vm);
+    std.debug.print("{}\n", .{e});
 }
 
 test "basic test" {
