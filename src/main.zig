@@ -14,6 +14,7 @@ const Object = struct {
 
     data: Data,
     marked: bool,
+    next: ?*Object,
 };
 
 const stack_max = 256;
@@ -21,11 +22,13 @@ const stack_max = 256;
 const VM = struct {
     stack: [stack_max]*Object,
     stack_size: i32,
+    first_object: ?*Object,
 };
 
 pub fn newVM(allocator: Allocator) !*VM {
     var ptr = try allocator.create(VM);
     ptr.stack_size = 0;
+    ptr.first_object = null;
     return ptr;
 }
 
@@ -42,16 +45,17 @@ pub fn pop(vm: *VM) *Object {
 }
 
 pub fn newObject(allocator: Allocator, vm: *VM, object_type: Object.Type) !*Object {
-    _ = vm;
-    var ptr = try allocator.create(Object);
-    ptr.* = .{
+    var object = try allocator.create(Object);
+    object.* = .{
         .data = switch (object_type) {
             .int => .{ .int = 0 },
             .pair => .{ .pair = .{} },
         },
         .marked = false,
+        .next = vm.first_object,
     };
-    return ptr;
+    vm.first_object = object;
+    return object;
 }
 
 pub fn pushInt(allocator: Allocator, vm: *VM, intValue: i32) !void {
@@ -69,8 +73,9 @@ pub fn pushPair(allocator: Allocator, vm: *VM) !*Object {
 }
 
 pub fn markAll(vm: *VM) void {
-    for (vm.stack) |ptr| {
-        mark(ptr);
+    var index: usize = 0;
+    while (index < vm.stack_size) : (index += 1) {
+        mark(vm.stack[index]);
     }
 }
 
@@ -82,9 +87,33 @@ pub fn mark(object: *Object) void {
     object.marked = true;
 
     if (object.data == .pair) {
-        mark(object.data.head);
-        mark(object.data.tail);
+        if (object.data.pair.head) |head| {
+            mark(head);
+        }
+        if (object.data.pair.tail) |tail| {
+            mark(tail);
+        }
     }
+}
+
+pub fn sweep(allocator: Allocator, vm: *VM) void {
+    var object = &vm.first_object;
+    while (object.* != null) {
+        if (!object.*.?.marked) {
+            const unreached = object.*.?;
+            object.* = unreached.next;
+            allocator.destroy(unreached);
+        } else {
+            object.*.?.marked = false;
+            object = &object.*.?.next;
+        }
+    }
+}
+
+pub fn gc(allocator: Allocator, vm: *VM) void {
+    _ = allocator;
+    markAll(vm);
+    sweep(allocator, vm);
 }
 
 pub fn main() anyerror!void {
@@ -95,26 +124,23 @@ pub fn main() anyerror!void {
     const vm = try newVM(allocator);
     defer allocator.destroy(vm);
 
+    defer gc(allocator, vm);
+
     try pushInt(allocator, vm, 1);
     try pushInt(allocator, vm, 2);
     const a = pop(vm);
     const b = pop(vm);
-    defer {
-        allocator.destroy(a);
-        allocator.destroy(b);
-    }
-    std.debug.print("a: {}\n", .{a});
-    std.debug.print("b: {}\n", .{b});
 
     try pushInt(allocator, vm, 3);
     try pushInt(allocator, vm, 4);
     const c = try pushPair(allocator, vm);
-    defer {
-        allocator.destroy(c.data.pair.head.?);
-        allocator.destroy(c.data.pair.tail.?);
-        allocator.destroy(c);
-    }
-    std.debug.print("c: {}\n", .{c});
+
+    const d = pop(vm);
+
+    _ = a;
+    _ = b;
+    _ = c;
+    _ = d;
 }
 
 test "basic test" {
